@@ -81,7 +81,7 @@ local function activate_venv(venv)
     if not lsp_restart_scheduled then
         lsp_restart_scheduled = true
         vim.schedule(function()
-            -- vim.cmd("LspRestart")
+            vim.cmd("LspRestart")
             lsp_restart_scheduled = false
         end)
     end
