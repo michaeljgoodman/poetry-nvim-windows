@@ -3,10 +3,13 @@ local M = {}
 local sep = package.config:sub(1, 1)
 local path_sep = (sep == "\\") and ";" or ":"
 
+-- State
 local last_venv = nil
 local current_project_root = nil
 local lsp_restart_scheduled = false
+local project_venvs = {} -- cache: project_root -> venv_path
 
+-- Utilities
 local function join(...) 
     return table.concat({ ... }, sep) 
 end
@@ -37,17 +40,24 @@ local function find_project_root(start_dir, max_up)
     return nil
 end
 
-local function get_venv_path(project_root)
+local function get_venv_path_cached(project_root)
+    if project_venvs[project_root] then
+        return project_venvs[project_root]
+    end
+
     local cmd = { "poetry", "env", "info", "-p", "-C", project_root }
     if sep == "\\" then
         cmd = { "cmd", "/c", table.concat(cmd, " ") }
     end
 
     local output = vim.fn.system(cmd)
-    if vim.v.shell_error ~= 0 or output == "" then
-        return ""
+    local venv = ""
+    if vim.v.shell_error == 0 and output ~= "" then
+        venv = vim.fn.trim(output)
     end
-    return vim.fn.trim(output)
+
+    project_venvs[project_root] = venv
+    return venv
 end
 
 -- Restart Python LSPs only if attached
@@ -90,15 +100,25 @@ local function activate_venv(venv, project_root)
     safe_restart_lsp()
 end
 
+-- Only relevant buffers: not special (e.g., Telescope, NvimTree, quickfix)
+local function is_relevant_buffer()
+    local buftype = vim.api.nvim_buf_get_option(0, "buftype")
+    local filetype = vim.api.nvim_buf_get_option(0, "filetype")
+    return buftype == "" and filetype == "python"
+end
+
 local function check_for_venv_for_buffer(buf_path)
+    if not is_relevant_buffer() then return end
+
     local start_dir = (buf_path ~= "") and buf_path or vim.fn.getcwd()
     local root = find_project_root(start_dir, 20)
     if root then
-        local venv = get_venv_path(root)
+        local venv = get_venv_path_cached(root)
         activate_venv(venv, root)
     end
 end
 
+-- Setup autocmds
 function M.setup()
     -- Activate venv before LSP attaches
     vim.api.nvim_create_autocmd("FileType", {
@@ -109,7 +129,7 @@ function M.setup()
         end,
     })
 
-    -- Also handle dynamic switching
+    -- Handle dynamic switching (BufEnter, DirChanged)
     vim.api.nvim_create_autocmd({ "BufEnter", "DirChanged" }, {
         callback = function()
             local buf_path = vim.fn.expand("%:p:h")
