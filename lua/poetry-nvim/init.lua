@@ -9,7 +9,18 @@ local function join(...)
     return table.concat({ ... }, sep)
 end
 
--- Walk up directories until we find poetry.lock (limit + Windows-safe root)
+-- Detect if dir is root
+local function is_root(dir)
+    if sep == "\\" then
+        -- Windows: root is "C:\" or "D:\" etc.
+        return dir:match("^%a:\\$") ~= nil
+    else
+        -- Unix: root is "/"
+        return dir == "/"
+    end
+end
+
+-- Walk up directories until we find poetry.lock (limit + root-safe)
 local function find_project_root(start_dir, max_up)
     local dir = start_dir or vim.fn.getcwd()
     local depth = 0
@@ -20,13 +31,11 @@ local function find_project_root(start_dir, max_up)
             return dir
         end
 
-        local parent = vim.fn.fnamemodify(dir, ":h")
-        -- Stop if we've reached root (Unix "/" or Windows "C:\", "D:\", etc.)
-        if parent == dir then
+        if is_root(dir) then
             break
         end
 
-        dir = parent
+        dir = vim.fn.fnamemodify(dir, ":h")
         depth = depth + 1
     end
 
