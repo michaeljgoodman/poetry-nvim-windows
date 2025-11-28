@@ -5,7 +5,7 @@ local path_sep = (sep == "\\" ) and ";" or ":" -- PATH env separator
 
 local last_venv = nil                          -- Cache last activated venv path
 local current_project_root = nil               -- Tracks active project root
-local lsp_restart_scheduled = false           -- Prevent overlapping LspRestart
+local restarting_lsp = false                   -- Prevent overlapping LspRestart
 
 local function join(...) 
     return table.concat({ ... }, sep) 
@@ -54,6 +54,32 @@ local function get_venv_path(project_root)
     return vim.fn.trim(output)
 end
 
+-- Safely restart Python LSPs
+local function safe_lsp_restart()
+    if restarting_lsp then return end
+
+    local clients_to_restart = {}
+    for _, client in pairs(vim.lsp.get_clients()) do
+        if client.config and client.config.cmd and client.config.cmd[1]:match("py") then
+            table.insert(clients_to_restart, client.id)
+        end
+    end
+
+    if #clients_to_restart == 0 then return end
+
+    restarting_lsp = true
+    vim.schedule(function()
+        for _, id in ipairs(clients_to_restart) do
+            vim.lsp.stop_client(id)
+        end
+        vim.defer_fn(function()
+            -- Reattach buffers to restart LSP
+            vim.cmd("edit")
+            restarting_lsp = false
+        end, 100)
+    end)
+end
+
 -- Activate venv if project root changed
 local function activate_venv(venv, project_root)
     if current_project_root == project_root then
@@ -80,16 +106,7 @@ local function activate_venv(venv, project_root)
 
     print("poetry_venv: activated venv:", venv)
 
-    -- Throttled LspRestart to avoid "Shutdown already requested"
-    if not lsp_restart_scheduled then
-        lsp_restart_scheduled = true
-        vim.schedule(function()
-            vim.cmd("LspRestart")
-            vim.defer_fn(function()
-                lsp_restart_scheduled = false
-            end, 100) -- small delay to allow shutdown to complete
-        end)
-    end
+    safe_lsp_restart()
 end
 
 -- Check for poetry.lock and activate venv
@@ -126,7 +143,6 @@ function M.setup()
     vim.api.nvim_create_autocmd("DirChanged", { callback = checkForLockfile })
 end
 
--- Run pre-init immediately when module is loaded
 pre_init()
 
 return M
