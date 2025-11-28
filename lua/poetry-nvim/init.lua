@@ -5,7 +5,7 @@ local path_sep = (sep == "\\" ) and ";" or ":" -- PATH env separator
 
 local last_venv = nil                          -- Cache last activated venv path
 local current_project_root = nil               -- Tracks active project root
-local restarting_lsp = false                   -- Prevent overlapping LspRestart
+local lsp_restart_scheduled = false            -- Throttle LSP restarts
 
 local function join(...) 
     return table.concat({ ... }, sep) 
@@ -54,36 +54,10 @@ local function get_venv_path(project_root)
     return vim.fn.trim(output)
 end
 
--- Safely restart Python LSPs
-local function safe_lsp_restart()
-    if restarting_lsp then return end
-
-    local clients_to_restart = {}
-    for _, client in pairs(vim.lsp.get_clients()) do
-        if client.config and client.config.cmd and client.config.cmd[1]:match("py") then
-            table.insert(clients_to_restart, client.id)
-        end
-    end
-
-    if #clients_to_restart == 0 then return end
-
-    restarting_lsp = true
-    vim.schedule(function()
-        for _, id in ipairs(clients_to_restart) do
-            vim.lsp.stop_client(id)
-        end
-        vim.defer_fn(function()
-            -- Reattach buffers to restart LSP
-            vim.cmd("edit")
-            restarting_lsp = false
-        end, 100)
-    end)
-end
-
 -- Activate venv if project root changed
 local function activate_venv(venv, project_root)
     if current_project_root == project_root then
-        print("poetry_venv: project already active, skipping activation")
+        -- Already active, skip
         return
     end
 
@@ -106,18 +80,22 @@ local function activate_venv(venv, project_root)
 
     print("poetry_venv: activated venv:", venv)
 
-    safe_lsp_restart()
+    -- Throttled LspRestart for Python LSPs
+    if not lsp_restart_scheduled then
+        lsp_restart_scheduled = true
+        vim.defer_fn(function()
+            vim.cmd("LspRestart")
+            lsp_restart_scheduled = false
+        end, 50)
+    end
 end
 
--- Check for poetry.lock and activate venv
-local function checkForLockfile()
-    local buf_path = vim.fn.expand("%:p:h")
+-- Check for poetry.lock starting from buffer path
+local function check_for_venv_for_buffer(buf_path)
     local start_dir = (buf_path ~= "") and buf_path or vim.fn.getcwd()
-    print("poetry_venv: checking from", start_dir)
-
     local root = find_project_root(start_dir, 20)
     if not root then
-        print("poetry_venv: no poetry.lock found")
+        -- No project here
         return
     end
 
@@ -125,24 +103,24 @@ local function checkForLockfile()
     activate_venv(venv, root)
 end
 
--- Pre-init: run immediately on module load to set venv for first LSP attach
-local function pre_init()
-    local buf_path = vim.fn.expand("%:p:h")
-    local start_dir = (buf_path ~= "") and buf_path or vim.fn.getcwd()
-    local root = find_project_root(start_dir, 20)
-    if root then
-        local venv = get_venv_path(root)
-        activate_venv(venv, root)
-    end
-end
-
--- Setup autocmds for dynamic switching
+-- Setup autocmds
 function M.setup()
-    vim.api.nvim_create_autocmd("VimEnter", { callback = checkForLockfile })
-    vim.api.nvim_create_autocmd("BufEnter", { callback = checkForLockfile })
-    vim.api.nvim_create_autocmd("DirChanged", { callback = checkForLockfile })
-end
+    -- Check on buffer open: pre-activate venv before LSP attaches
+    vim.api.nvim_create_autocmd("FileType", {
+        pattern = "python",
+        callback = function()
+            local buf_path = vim.fn.expand("%:p:h")
+            check_for_venv_for_buffer(buf_path)
+        end,
+    })
 
-pre_init()
+    -- Optional: also handle DirChanged or BufEnter for dynamic switching
+    vim.api.nvim_create_autocmd({ "BufEnter", "DirChanged" }, {
+        callback = function()
+            local buf_path = vim.fn.expand("%:p:h")
+            check_for_venv_for_buffer(buf_path)
+        end,
+    })
+end
 
 return M
