@@ -41,25 +41,23 @@ end
 
 -- Get Poetry virtualenv path, running in project_root
 local function get_venv_path(project_root)
-    local cmd = "poetry env info -p"
-    if sep == "\\" then
-        cmd = "cmd /c " .. cmd
-    end
+    local cmd = { "poetry", "env", "info", "-p", "-C", project_root }
 
-    local cwd = vim.fn.getcwd()           -- save current directory
-    vim.cmd("cd " .. project_root)        -- temporarily cd into project root
+    -- On Windows, run through cmd /c if needed
+    if sep == "\\" then
+        cmd = { "cmd", "/c", table.concat(cmd, " ") }
+    end
 
     local output = vim.fn.system(cmd)
 
-    vim.cmd("cd " .. cwd)                 -- restore original cwd
-
     if vim.v.shell_error ~= 0 or output == "" then
-        print("poetry_venv: failed to get venv path in " .. project_root)
+        print("poetry_venv: failed to get venv path for project at " .. project_root)
         return ""
     end
 
     return vim.fn.trim(output)
 end
+
 
 -- Activate virtualenv
 local function activate_venv(venv)
