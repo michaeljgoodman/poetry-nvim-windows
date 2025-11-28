@@ -12,15 +12,13 @@ end
 -- Detect if dir is root
 local function is_root(dir)
     if sep == "\\" then
-        -- Windows: root is "C:\" or "D:\" etc.
         return dir:match("^%a:\\$") ~= nil
     else
-        -- Unix: root is "/"
         return dir == "/"
     end
 end
 
--- Walk up directories until we find poetry.lock (limit + root-safe)
+-- Walk up directories until we find poetry.lock
 local function find_project_root(start_dir, max_up)
     local dir = start_dir or vim.fn.getcwd()
     local depth = 0
@@ -30,15 +28,10 @@ local function find_project_root(start_dir, max_up)
         if vim.fn.filereadable(join(dir, "poetry.lock")) == 1 then
             return dir
         end
-
-        if is_root(dir) then
-            break
-        end
-
+        if is_root(dir) then break end
         dir = vim.fn.fnamemodify(dir, ":h")
         depth = depth + 1
     end
-
     return nil
 end
 
@@ -46,22 +39,20 @@ end
 local function get_venv_path()
     local cmd = "poetry env info -p"
     if sep == "\\" then
-        -- Windows: explicitly run in cmd
         cmd = "cmd /c " .. cmd
     end
-
     local output = vim.fn.system(cmd)
     if vim.v.shell_error ~= 0 then
         print("poetry_venv: failed to get venv path")
         return ""
     end
-
     return vim.fn.trim(output)
 end
 
 -- Activate virtualenv
 local function activate_venv(venv)
     if venv == last_venv or venv == "" then
+        print("poetry_venv: venv already active:", last_venv or "none")
         return
     end
     last_venv = venv
@@ -69,16 +60,13 @@ local function activate_venv(venv)
     local scripts = (sep == "\\") and "Scripts" or "bin"
     local scripts_path = join(venv, scripts)
 
-    -- Update env vars for child processes (LSP, linters, :!python, etc.)
     vim.env.VIRTUAL_ENV = venv
-
-    -- Prepend to PATH only once
     local current_path = vim.env.PATH or ""
     if not current_path:find(scripts_path, 1, true) then
         vim.env.PATH = scripts_path .. path_sep .. current_path
     end
 
-    print("poetry_venv: activated venv at", venv)
+    print("poetry_venv: activated venv:", venv)
 end
 
 -- Check for poetry.lock and activate venv
@@ -93,9 +81,8 @@ local function checkForLockfile()
         return
     end
 
-    -- Avoid re-checking the same project
     if root == last_project_root then
-        print("poetry_venv: project already activated")
+        print("poetry_venv: project already activated, current venv:", last_venv or "none")
         return
     end
     last_project_root = root
@@ -111,20 +98,9 @@ end
 
 -- Setup autocmds
 function M.setup()
-    -- On Neovim startup
-    vim.api.nvim_create_autocmd("VimEnter", {
-        callback = checkForLockfile,
-    })
-
-    -- When switching buffers (works well with autochdir)
-    vim.api.nvim_create_autocmd("BufEnter", {
-        callback = checkForLockfile,
-    })
-
-    -- When directory changes explicitly (:cd, :lcd, :tcd)
-    vim.api.nvim_create_autocmd("DirChanged", {
-        callback = checkForLockfile,
-    })
+    vim.api.nvim_create_autocmd("VimEnter", { callback = checkForLockfile })
+    vim.api.nvim_create_autocmd("BufEnter", { callback = checkForLockfile })
+    vim.api.nvim_create_autocmd("DirChanged", { callback = checkForLockfile })
 end
 
 return M
