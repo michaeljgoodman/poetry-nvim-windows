@@ -1,9 +1,9 @@
 local M = {}
 
-local sep = package.config:sub(1, 1)      -- "/" on Unix, "\" on Windows
+local sep = package.config:sub(1, 1)          -- "/" on Unix, "\" on Windows
 local path_sep = (sep == "\\") and ";" or ":" -- PATH env separator
-local last_venv = nil                     -- Cache last activated virtualenv
-local last_project_root = nil             -- Cache last project root
+local last_venv = nil                         -- Cache last activated virtualenv
+local last_project_root = nil                 -- Cache last project root
 
 local function join(...)
     return table.concat({ ... }, sep)
@@ -20,32 +20,38 @@ end
 
 -- Walk up directories until we find poetry.lock
 local function find_project_root(start_dir, max_up)
-    local dir = start_dir or vim.fn.getcwd()
+    local dir = start_dir and vim.fn.fnamemodify(start_dir, ":p") or vim.fn.getcwd()
     local depth = 0
     max_up = max_up or 20
 
     while dir and dir ~= "" and depth < max_up do
-        if vim.fn.filereadable(join(dir, "poetry.lock")) == 1 then
+        local lockfile = dir .. sep .. "poetry.lock"
+        if vim.fn.filereadable(lockfile) == 1 then
             return dir
         end
+
         if is_root(dir) then break end
-        dir = vim.fn.fnamemodify(dir, ":h")
+        local parent = vim.fn.fnamemodify(dir, ":h")
+        if parent == dir then break end -- extra safety
+        dir = parent
         depth = depth + 1
     end
     return nil
 end
 
--- Get Poetry virtualenv path
-local function get_venv_path()
+-- Get Poetry virtualenv path, running in project_root
+local function get_venv_path(project_root)
     local cmd = "poetry env info -p"
     if sep == "\\" then
         cmd = "cmd /c " .. cmd
     end
-    local output = vim.fn.system(cmd)
-    if vim.v.shell_error ~= 0 then
-        print("poetry_venv: failed to get venv path")
+
+    local output = vim.fn.system(cmd, nil, project_root)
+    if vim.v.shell_error ~= 0 or output == "" then
+        print("poetry_venv: failed to get venv path in " .. project_root)
         return ""
     end
+
     return vim.fn.trim(output)
 end
 
@@ -88,11 +94,11 @@ local function checkForLockfile()
     last_project_root = root
     print("poetry_venv: found project root", root)
 
-    local venv = get_venv_path()
+    local venv = get_venv_path(root)
     if venv ~= "" then
         activate_venv(venv)
     else
-        print("poetry_venv: no virtualenv detected for project")
+        print("poetry_venv: no virtualenv detected for project at " .. root)
     end
 end
 
