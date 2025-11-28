@@ -50,6 +50,26 @@ local function get_venv_path(project_root)
     return vim.fn.trim(output)
 end
 
+-- Restart Python LSPs only if attached
+local function safe_restart_lsp()
+    local has_python_lsp = false
+    for _, client in pairs(vim.lsp.get_clients()) do
+        if client.config and client.config.cmd and client.config.cmd[1]:match("py") then
+            has_python_lsp = true
+            break
+        end
+    end
+    if not has_python_lsp then return end
+
+    if not lsp_restart_scheduled then
+        lsp_restart_scheduled = true
+        vim.defer_fn(function()
+            vim.cmd("LspRestart")
+            lsp_restart_scheduled = false
+        end, 50)
+    end
+end
+
 local function activate_venv(venv, project_root)
     if current_project_root == project_root or venv == "" then
         return
@@ -67,13 +87,7 @@ local function activate_venv(venv, project_root)
         vim.env.PATH = scripts_path .. path_sep .. current_path
     end
 
-    if not lsp_restart_scheduled then
-        lsp_restart_scheduled = true
-        vim.defer_fn(function()
-            vim.cmd("LspRestart")
-            lsp_restart_scheduled = false
-        end, 50)
-    end
+    safe_restart_lsp()
 end
 
 local function check_for_venv_for_buffer(buf_path)
@@ -86,6 +100,7 @@ local function check_for_venv_for_buffer(buf_path)
 end
 
 function M.setup()
+    -- Activate venv before LSP attaches
     vim.api.nvim_create_autocmd("FileType", {
         pattern = "python",
         callback = function()
@@ -94,6 +109,7 @@ function M.setup()
         end,
     })
 
+    -- Also handle dynamic switching
     vim.api.nvim_create_autocmd({ "BufEnter", "DirChanged" }, {
         callback = function()
             local buf_path = vim.fn.expand("%:p:h")
