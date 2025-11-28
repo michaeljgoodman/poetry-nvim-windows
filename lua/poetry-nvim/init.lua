@@ -46,7 +46,13 @@ local function get_venv_path(project_root)
         cmd = "cmd /c " .. cmd
     end
 
-    local output = vim.fn.system(cmd, nil, project_root)
+    local cwd = vim.fn.getcwd()           -- save current directory
+    vim.cmd("cd " .. project_root)        -- temporarily cd into project root
+
+    local output = vim.fn.system(cmd)
+
+    vim.cmd("cd " .. cwd)                 -- restore original cwd
+
     if vim.v.shell_error ~= 0 or output == "" then
         print("poetry_venv: failed to get venv path in " .. project_root)
         return ""
