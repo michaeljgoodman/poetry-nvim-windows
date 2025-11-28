@@ -1,17 +1,16 @@
 local M = {}
 
-local sep = package.config:sub(1, 1)          -- "/" on Unix, "\" on Windows
-local path_sep = (sep == "\\" ) and ";" or ":" -- PATH env separator
+local sep = package.config:sub(1, 1)
+local path_sep = (sep == "\\") and ";" or ":"
 
-local last_venv = nil                          -- Cache last activated venv path
-local current_project_root = nil               -- Tracks active project root
-local lsp_restart_scheduled = false            -- Throttle LSP restarts
+local last_venv = nil
+local current_project_root = nil
+local lsp_restart_scheduled = false
 
 local function join(...) 
     return table.concat({ ... }, sep) 
 end
 
--- Detect if dir is root
 local function is_root(dir)
     if sep == "\\" then
         return dir:match("^%a:\\$") ~= nil
@@ -20,7 +19,6 @@ local function is_root(dir)
     end
 end
 
--- Walk up directories to find poetry.lock
 local function find_project_root(start_dir, max_up)
     local dir = start_dir and vim.fn.fnamemodify(start_dir, ":p") or vim.fn.getcwd()
     local depth = 0
@@ -39,7 +37,6 @@ local function find_project_root(start_dir, max_up)
     return nil
 end
 
--- Get Poetry virtualenv path using -C
 local function get_venv_path(project_root)
     local cmd = { "poetry", "env", "info", "-p", "-C", project_root }
     if sep == "\\" then
@@ -48,21 +45,13 @@ local function get_venv_path(project_root)
 
     local output = vim.fn.system(cmd)
     if vim.v.shell_error ~= 0 or output == "" then
-        print("poetry_venv: failed to get venv path for project at " .. project_root)
         return ""
     end
     return vim.fn.trim(output)
 end
 
--- Activate venv if project root changed
 local function activate_venv(venv, project_root)
-    if current_project_root == project_root then
-        -- Already active, skip
-        return
-    end
-
-    if venv == "" then
-        print("poetry_venv: no venv found, skipping activation")
+    if current_project_root == project_root or venv == "" then
         return
     end
 
@@ -78,9 +67,6 @@ local function activate_venv(venv, project_root)
         vim.env.PATH = scripts_path .. path_sep .. current_path
     end
 
-    print("poetry_venv: activated venv:", venv)
-
-    -- Throttled LspRestart for Python LSPs
     if not lsp_restart_scheduled then
         lsp_restart_scheduled = true
         vim.defer_fn(function()
@@ -90,22 +76,16 @@ local function activate_venv(venv, project_root)
     end
 end
 
--- Check for poetry.lock starting from buffer path
 local function check_for_venv_for_buffer(buf_path)
     local start_dir = (buf_path ~= "") and buf_path or vim.fn.getcwd()
     local root = find_project_root(start_dir, 20)
-    if not root then
-        -- No project here
-        return
+    if root then
+        local venv = get_venv_path(root)
+        activate_venv(venv, root)
     end
-
-    local venv = get_venv_path(root)
-    activate_venv(venv, root)
 end
 
--- Setup autocmds
 function M.setup()
-    -- Check on buffer open: pre-activate venv before LSP attaches
     vim.api.nvim_create_autocmd("FileType", {
         pattern = "python",
         callback = function()
@@ -114,7 +94,6 @@ function M.setup()
         end,
     })
 
-    -- Optional: also handle DirChanged or BufEnter for dynamic switching
     vim.api.nvim_create_autocmd({ "BufEnter", "DirChanged" }, {
         callback = function()
             local buf_path = vim.fn.expand("%:p:h")
