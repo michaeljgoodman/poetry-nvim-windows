@@ -3,7 +3,7 @@ local M = {}
 local sep = package.config:sub(1, 1)          -- "/" on Unix, "\" on Windows
 local path_sep = (sep == "\\") and ";" or ":" -- PATH env separator
 local last_venv = nil                         -- Cache last activated virtualenv
-local last_project_root = nil                 -- Cache last project root
+local current_project_root = nil              -- Tracks the currently active poetry project
 local lsp_restart_scheduled = false           -- Prevent multiple overlapping LspRestart
 
 local function join(...)
@@ -58,12 +58,19 @@ local function get_venv_path(project_root)
     return vim.fn.trim(output)
 end
 
--- Activate virtualenv
-local function activate_venv(venv)
-    if venv == last_venv or venv == "" then
-        print("poetry_venv: venv already active:", last_venv or "none")
+-- Activate virtualenv if project has changed
+local function activate_venv(venv, project_root)
+    if current_project_root == project_root then
+        print("poetry_venv: project already active, skipping activation")
         return
     end
+
+    if venv == "" then
+        print("poetry_venv: no venv found, skipping activation")
+        return
+    end
+
+    current_project_root = project_root
     last_venv = venv
 
     local scripts = (sep == "\\") and "Scripts" or "bin"
@@ -77,7 +84,7 @@ local function activate_venv(venv)
 
     print("poetry_venv: activated venv:", venv)
 
-    -- Throttled LspRestart to avoid "Shutdown already requested"
+    -- Throttled LspRestart
     if not lsp_restart_scheduled then
         lsp_restart_scheduled = true
         vim.schedule(function()
@@ -87,7 +94,7 @@ local function activate_venv(venv)
     end
 end
 
--- Check for poetry.lock and activate venv
+-- Check for poetry.lock and activate venv if needed
 local function checkForLockfile()
     local buf_path = vim.fn.expand("%:p:h")
     local start_dir = (buf_path ~= "") and buf_path or vim.fn.getcwd()
@@ -99,19 +106,8 @@ local function checkForLockfile()
         return
     end
 
-    if root == last_project_root then
-        print("poetry_venv: project already activated, current venv:", last_venv or "none")
-        return
-    end
-    last_project_root = root
-    print("poetry_venv: found project root", root)
-
     local venv = get_venv_path(root)
-    if venv ~= "" then
-        activate_venv(venv)
-    else
-        print("poetry_venv: no virtualenv detected for project at " .. root)
-    end
+    activate_venv(venv, root)
 end
 
 -- Setup autocmds
