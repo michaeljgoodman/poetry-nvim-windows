@@ -4,6 +4,7 @@ local sep = package.config:sub(1, 1)          -- "/" on Unix, "\" on Windows
 local path_sep = (sep == "\\") and ";" or ":" -- PATH env separator
 local last_venv = nil                         -- Cache last activated virtualenv
 local last_project_root = nil                 -- Cache last project root
+local lsp_restart_scheduled = false           -- Prevent multiple overlapping LspRestart
 
 local function join(...)
     return table.concat({ ... }, sep)
@@ -32,14 +33,14 @@ local function find_project_root(start_dir, max_up)
 
         if is_root(dir) then break end
         local parent = vim.fn.fnamemodify(dir, ":h")
-        if parent == dir then break end -- extra safety
+        if parent == dir then break end
         dir = parent
         depth = depth + 1
     end
     return nil
 end
 
--- Get Poetry virtualenv path, running in project_root
+-- Get Poetry virtualenv path using -C flag for project root
 local function get_venv_path(project_root)
     local cmd = { "poetry", "env", "info", "-p", "-C", project_root }
 
@@ -76,12 +77,15 @@ local function activate_venv(venv)
 
     print("poetry_venv: activated venv:", venv)
 
-    -- Automatically run :LspRestart for Python LSPs
-    vim.schedule(function()
-        vim.cmd("LspRestart")
-    end)
+    -- Throttled LspRestart to avoid "Shutdown already requested"
+    if not lsp_restart_scheduled then
+        lsp_restart_scheduled = true
+        vim.schedule(function()
+            vim.cmd("LspRestart")
+            lsp_restart_scheduled = false
+        end)
+    end
 end
-
 
 -- Check for poetry.lock and activate venv
 local function checkForLockfile()
