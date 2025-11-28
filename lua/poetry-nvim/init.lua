@@ -43,7 +43,6 @@ end
 local function get_venv_path(project_root)
     local cmd = { "poetry", "env", "info", "-p", "-C", project_root }
 
-    -- On Windows, run through cmd /c if needed
     if sep == "\\" then
         cmd = { "cmd", "/c", table.concat(cmd, " ") }
     end
@@ -57,7 +56,6 @@ local function get_venv_path(project_root)
 
     return vim.fn.trim(output)
 end
-
 
 -- Activate virtualenv
 local function activate_venv(venv)
@@ -77,6 +75,19 @@ local function activate_venv(venv)
     end
 
     print("poetry_venv: activated venv:", venv)
+
+    -- Automatically restart Python LSP clients
+    if vim.lsp and vim.lsp.get_active_clients then
+        for _, client in pairs(vim.lsp.get_active_clients()) do
+            local cmd = client.config.cmd
+            if cmd and cmd[1] and (cmd[1]:match("pyright") or cmd[1]:match("pylsp")) then
+                vim.lsp.stop_client(client.id)
+                vim.defer_fn(function()
+                    vim.cmd("edit")  -- triggers LSP reattach
+                end, 50)
+            end
+        end
+    end
 end
 
 -- Check for poetry.lock and activate venv
